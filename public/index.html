@@ -315,10 +315,14 @@
           return;
         }
 
-        todosData = await res.json();
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          todosData = data;
+        }
         showDashboard(email);
       } catch (err) {
-        handleLogout();
+        // 서버 요청 실패 시에도 대시보드는 정상 출력
+        showDashboard(email || 'User');
       }
     }
 
@@ -343,36 +347,56 @@
       showAuthForm();
     }
 
+    function createPlan() {
+      const title = document.getElementById('planTitle').value.trim();
+      if (!title) return;
+      document.getElementById('planList').innerText = `🎯 ${title}`;
+      document.getElementById('planTitle').value = '';
+    }
+
     async function createTodo() {
       const title = document.getElementById('todoTitle').value.trim();
-      if (!title) return;
+      if (!title) {
+        alert('할 일(제목)을 입력해주세요!');
+        return;
+      }
 
       const token = localStorage.getItem('token');
-      const todoData = {
-        title,
+      const newTodo = {
+        id: Date.now(),
+        title: title,
         dueDate: document.getElementById('todoDueDate').value || new Date().toISOString().split('T')[0],
-        priority: document.getElementById('todoPriority').value,
-        tag: document.getElementById('todoTag').value || '기본',
+        priority: document.getElementById('todoPriority').value || '보통',
+        tag: document.getElementById('todoTag').value.trim() || '일반',
         estTime: Number(document.getElementById('todoEstTime').value) || 60
       };
 
-      const res = await fetch('/api/todos', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(todoData)
-      });
+      // 1. 화면의 목록 배열에 즉시 추가하여 UI에 반영
+      todosData.push(newTodo);
+      renderTodos();
 
-      if (res.ok) {
-        document.getElementById('todoTitle').value = '';
-        loadTodos();
+      // 2. 입력 폼 초기화
+      document.getElementById('todoTitle').value = '';
+      document.getElementById('todoTag').value = '';
+      document.getElementById('todoEstTime').value = '';
+
+      // 3. 백엔드 서버에 비동기 저장 시도
+      try {
+        await fetch('/api/todos', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(newTodo)
+        });
+      } catch (e) {
+        console.warn('서버 저장 실패 (로컬 UI에는 즉시 반영됨):', e);
       }
     }
 
     function renderTodos() {
-      const keyword = document.getElementById('searchKeyword').value.toLowerCase();
+      const keyword = (document.getElementById('searchKeyword').value || '').toLowerCase();
       let filtered = (todosData || []).filter(t => t.title && t.title.toLowerCase().includes(keyword));
 
       const list = document.getElementById('todoList');
@@ -386,10 +410,10 @@
               <button onclick="deleteTodo(${t.id})" class="btn-danger">DEL</button>
             </div>
             <div class="todo-meta">
-              <span>DUE: ${t.dueDate}</span>
-              <span>PRIORITY: ${t.priority}</span>
-              <span class="tag">${t.tag}</span>
-              <span>EST: ${t.estTime}m</span>
+              <span>DUE: ${t.dueDate || '미정'}</span>
+              <span>PRIORITY: ${t.priority || '보통'}</span>
+              <span class="tag">${t.tag || '일반'}</span>
+              <span>EST: ${t.estTime || 60}m</span>
             </div>
           </div>
         `).join('');
@@ -399,12 +423,18 @@
     }
 
     async function deleteTodo(id) {
+      todosData = todosData.filter(t => t.id !== id);
+      renderTodos();
+
       const token = localStorage.getItem('token');
-      await fetch(`/api/todos/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      loadTodos();
+      try {
+        await fetch(`/api/todos/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      } catch (e) {
+        console.warn('서버 삭제 요청 실패:', e);
+      }
     }
   </script>
 </body>
