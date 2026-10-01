@@ -150,8 +150,23 @@ app.get(['/api/todos', '/todos'], authenticateToken, async (req, res) => {
     return res.status(500).json({ error: 'Supabase 연동 정보(URL/KEY)가 올바르게 설정되지 않았습니다.' });
   }
 
+  let userId = req.user.id || req.user.userId;
+  if (!userId && req.user.email) {
+    const { data: u } = await supabase.from('users').select('id').eq('email', req.user.email).maybeSingle();
+    if (u) userId = u.id;
+  }
+
   try {
-    const { data, error } = await supabase.from('todos').select('*').eq('user_id', req.user.email);
+    const filter = userId && req.user.email 
+      ? `user_id.eq.${userId},user_id.eq.${req.user.email}` 
+      : (userId ? `user_id.eq.${userId}` : `user_id.eq.${req.user.email}`);
+
+    const { data, error } = await supabase
+      .from('todos')
+      .select('*')
+      .or(filter)
+      .order('id', { ascending: false });
+
     if (error) {
       if (error.code === 'PGRST205') {
         return res.status(500).json({ error: "Supabase DB에 'todos' 테이블이 없습니다." });
@@ -175,9 +190,17 @@ app.post(['/api/todos', '/todos'], authenticateToken, async (req, res) => {
     return res.status(400).json({ error: '할 일 제목을 입력해주세요.' });
   }
 
+  // users 테이블의 기본키(id)와 매칭되도록 우선 조회
+  let userId = req.user.id || req.user.userId;
+  if (!userId && req.user.email) {
+    const { data: u } = await supabase.from('users').select('id').eq('email', req.user.email).maybeSingle();
+    if (u) userId = u.id;
+  }
+  if (!userId) userId = req.user.email;
+
   try {
     const newTodo = {
-      user_id: req.user.email || req.user.id,
+      user_id: userId,
       title,
       due_date: due_date || dueDate || new Date().toISOString().split('T')[0],
       priority: priority || '보통',
@@ -191,7 +214,23 @@ app.post(['/api/todos', '/todos'], authenticateToken, async (req, res) => {
       newTodo.id = id;
     }
 
-    const { data, error } = await supabase.from('todos').insert([newTodo]).select();
+    let { data, error } = await supabase.from('todos').insert([newTodo]).select();
+
+    // 1) id 충돌 시 id 제거 후 자동 생성 재시도
+    if (error && error.code === '23505' && newTodo.id) {
+      delete newTodo.id;
+      const retry = await supabase.from('todos').insert([newTodo]).select();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    // 2) 외래 키(23503) 오류 시 user_id를 email로 변경하여 재시도 (테이블이 email을 참조하는 경우)
+    if (error && error.code === '23503' && req.user.email && newTodo.user_id !== req.user.email) {
+      newTodo.user_id = req.user.email;
+      const retry = await supabase.from('todos').insert([newTodo]).select();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       console.error('Supabase todos insert error:', error);
@@ -202,7 +241,7 @@ app.post(['/api/todos', '/todos'], authenticateToken, async (req, res) => {
         return res.status(403).json({ error: "Supabase 'todos' 테이블의 RLS 보안 정책에 의해 저장이 차단되었습니다. RLS 정책을 추가하거나 비활성화해주세요." });
       }
       if (error.code === '23503') {
-        return res.status(400).json({ error: "외래 키 제약 조건 오류: user_id가 맞지 않습니다." });
+        return res.status(400).json({ error: "외래 키 제약 조건 오류: 사용자의 계정 ID가 DB와 일치하지 않습니다. 로그아웃 후 다시 로그인해 주세요." });
       }
       if (error.code === '23502') {
         return res.status(400).json({ error: `필수 컬럼 누락 제약 오류: ${error.message}` });
@@ -224,8 +263,20 @@ app.delete(['/api/todos/:id', '/todos/:id'], authenticateToken, async (req, res)
   }
 
   const { id } = req.params;
+  let userId = req.user.id || req.user.userId;
+  if (!userId && req.user.email) {
+    const { data: u } = await supabase.from('users').select('id').eq('email', req.user.email).maybeSingle();
+    if (u) userId = u.id;
+  }
+
   try {
-    const { error } = await supabase.from('todos').delete().eq('id', id).eq('user_id', req.user.email);
+    const userIds = [userId, req.user.email].filter(Boolean);
+    const { error } = await supabase
+      .from('todos')
+      .delete()
+      .eq('id', id)
+      .in('user_id', userIds);
+
     if (error) throw error;
     res.json({ message: '삭제 성공' });
   } catch (err) {
