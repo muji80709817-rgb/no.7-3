@@ -6,16 +6,11 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 app.use(express.json());
 
-// 1. 철저한 보안 원칙 적용: URL과 KEY를 절대 코드에 작성하지 않고 환경변수로만 불러옵니다.
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// 환경변수 누락 시 서버 다운 방지 및 디버깅을 위한 방어 로직
-let supabase;
-if (SUPABASE_URL && SUPABASE_KEY) {
-  supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-}
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // [미들웨어] 토큰 검증 및 인가
 function authenticateToken(req, res, next) {
@@ -31,10 +26,8 @@ function authenticateToken(req, res, next) {
   });
 }
 
-// 2. 회원가입 엔드포인트
-app.post('/api/auth/signup', async (req, res) => {
-  if (!supabase) return res.status(500).json({ error: '서버 환경변수(DB 연동)가 설정되지 않았습니다.' });
-  
+// 1. 회원가입 (경로 매칭 오류 원천 차단형)
+app.post(['/api/auth/signup', '/auth/signup', '/signup'], async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: '이메일과 비밀번호를 입력하세요.' });
 
@@ -51,10 +44,8 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-// 3. 로그인 엔드포인트
-app.post('/api/auth/login', async (req, res) => {
-  if (!supabase) return res.status(500).json({ error: '서버 환경변수(DB 연동)가 설정되지 않았습니다.' });
-
+// 2. 로그인
+app.post(['/api/auth/login', '/auth/login', '/login'], async (req, res) => {
   const { email, password } = req.body;
   try {
     const { data: user, error } = await supabase
@@ -75,8 +66,8 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// 4. 태스크 목록 조회
-app.get('/api/todos', authenticateToken, async (req, res) => {
+// 3. 태스크 목록 조회
+app.get(['/api/todos', '/todos'], authenticateToken, async (req, res) => {
   try {
     const { data, error } = await supabase.from('todos').select('*').eq('user_id', req.user.email);
     if (error) throw error;
@@ -86,8 +77,8 @@ app.get('/api/todos', authenticateToken, async (req, res) => {
   }
 });
 
-// 5. 태스크 추가 (DO)
-app.post('/api/todos', authenticateToken, async (req, res) => {
+// 4. 태스크 추가
+app.post(['/api/todos', '/todos'], authenticateToken, async (req, res) => {
   const { title, dueDate, due_date, priority, tag, estTime, est_time } = req.body;
   try {
     const newTodo = {
@@ -106,8 +97,8 @@ app.post('/api/todos', authenticateToken, async (req, res) => {
   }
 });
 
-// 6. 태스크 삭제
-app.delete('/api/todos/:id', authenticateToken, async (req, res) => {
+// 5. 태스크 삭제
+app.delete(['/api/todos/:id', '/todos/:id'], authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     const { error } = await supabase.from('todos').delete().eq('id', id).eq('user_id', req.user.email);
