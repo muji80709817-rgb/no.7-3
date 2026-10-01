@@ -1,3 +1,4 @@
+try { require('dotenv').config(); } catch (e) {}
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -6,11 +7,20 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 app.use(express.json());
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
-const JWT_SECRET = process.env.JWT_SECRET;
+// 환경 변수 설정 (기본 Fallback 제공으로 환경변수 미등록 시 서버 다운 방지)
+const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://gylnpuzwwiezrxyrpydh.supabase.co').trim();
+const SUPABASE_KEY = (process.env.SUPABASE_ANON_KEY || 'sb_publishable_vRJKHAuJQcgH7SOlo1MMyQ_4egYXQPX').trim();
+const JWT_SECRET = (process.env.JWT_SECRET || 'skt-k-digital-task7-secret').trim();
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// Supabase 클라이언트 안전 생성 (서버 런타임 오류 방어)
+let supabase = null;
+if (SUPABASE_URL && SUPABASE_KEY) {
+  try {
+    supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  } catch (err) {
+    console.error('Supabase 클라이언트 생성 실패:', err.message);
+  }
+}
 
 // [미들웨어] 토큰 검증 및 인가
 function authenticateToken(req, res, next) {
@@ -26,10 +36,44 @@ function authenticateToken(req, res, next) {
   });
 }
 
+// [진단용 엔드포인트] 브라우저에서 /api/status 접속 시 Supabase 연결 및 환경변수 상태 확인
+app.get(['/api/status', '/status', '/api/health'], async (req, res) => {
+  let dbConnection = 'disconnected';
+  let dbError = null;
+
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('users').select('id', { head: true, count: 'exact' });
+      if (error) {
+        dbConnection = 'failed';
+        dbError = error.message;
+      } else {
+        dbConnection = 'connected';
+      }
+    } catch (e) {
+      dbConnection = 'error';
+      dbError = e.message;
+    }
+  }
+
+  res.json({
+    status: 'ok',
+    supabaseUrl: SUPABASE_URL,
+    hasAnonKey: !!SUPABASE_KEY,
+    dbConnection,
+    dbError,
+    hint: dbError ? 'Supabase 대시보드(Settings > API)에서 발급받은 anon key를 환경변수(SUPABASE_ANON_KEY)로 등록하세요.' : '정상 동작 중'
+  });
+});
+
 // 1. 회원가입 (경로 매칭 오류 원천 차단형)
 app.post(['/api/auth/signup', '/auth/signup', '/signup'], async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: '이메일과 비밀번호를 입력하세요.' });
+
+  if (!supabase) {
+    return res.status(500).json({ error: 'Supabase 연동 정보(URL/KEY)가 올바르게 설정되지 않았습니다.' });
+  }
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -47,6 +91,11 @@ app.post(['/api/auth/signup', '/auth/signup', '/signup'], async (req, res) => {
 // 2. 로그인
 app.post(['/api/auth/login', '/auth/login', '/login'], async (req, res) => {
   const { email, password } = req.body;
+
+  if (!supabase) {
+    return res.status(500).json({ error: 'Supabase 연동 정보(URL/KEY)가 올바르게 설정되지 않았습니다.' });
+  }
+
   try {
     const { data: user, error } = await supabase
       .from('users')
@@ -68,6 +117,10 @@ app.post(['/api/auth/login', '/auth/login', '/login'], async (req, res) => {
 
 // 3. 태스크 목록 조회
 app.get(['/api/todos', '/todos'], authenticateToken, async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({ error: 'Supabase 연동 정보(URL/KEY)가 올바르게 설정되지 않았습니다.' });
+  }
+
   try {
     const { data, error } = await supabase.from('todos').select('*').eq('user_id', req.user.email);
     if (error) throw error;
@@ -79,6 +132,10 @@ app.get(['/api/todos', '/todos'], authenticateToken, async (req, res) => {
 
 // 4. 태스크 추가
 app.post(['/api/todos', '/todos'], authenticateToken, async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({ error: 'Supabase 연동 정보(URL/KEY)가 올바르게 설정되지 않았습니다.' });
+  }
+
   const { title, dueDate, due_date, priority, tag, estTime, est_time } = req.body;
   try {
     const newTodo = {
@@ -99,6 +156,10 @@ app.post(['/api/todos', '/todos'], authenticateToken, async (req, res) => {
 
 // 5. 태스크 삭제
 app.delete(['/api/todos/:id', '/todos/:id'], authenticateToken, async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({ error: 'Supabase 연동 정보(URL/KEY)가 올바르게 설정되지 않았습니다.' });
+  }
+
   const { id } = req.params;
   try {
     const { error } = await supabase.from('todos').delete().eq('id', id).eq('user_id', req.user.email);
