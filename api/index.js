@@ -1,24 +1,19 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jwt-simple'); // 또는 'jsonwebtoken'
+const jwt = require('jsonwebtoken'); // jsonwebtoken으로 수정
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.use(express.json());
 
-// [보안 강화] 환경변수(process.env)로만 키를 가져옵니다.
+// 환경변수(process.env) 참조
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
-const JWT_SECRET = process.env.JWT_SECRET;
-
-// 환경변수 미설치 시 에러 방지 및 로깅
-if (!SUPABASE_URL || !SUPABASE_KEY || !JWT_SECRET) {
-  console.error("⚠️ [보안 경고] 필수 환경변수(SUPABASE_URL, SUPABASE_ANON_KEY, JWT_SECRET)가 설정되지 않았습니다.");
-}
+const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-pds-task7-key';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// [미들웨어] 토큰 검증 및 인가 (401 / 403 처리)
+// [미들웨어] 토큰 검증 및 인가
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -27,13 +22,13 @@ function authenticateToken(req, res, next) {
     return res.status(401).json({ error: '로그인이 필요합니다.' });
   }
 
-  try {
-    const user = jwt.decode(token, JWT_SECRET);
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: '유효하지 않거나 만료된 토큰입니다.' });
+    }
     req.user = user;
     next();
-  } catch (err) {
-    return res.status(403).json({ error: '유효하지 않거나 만료된 토큰입니다.' });
-  }
+  });
 }
 
 // 1. 회원가입
@@ -76,8 +71,8 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: '비밀번호가 일치하지 않습니다.' });
     }
 
-    // JWT 토큰 발급
-    const token = jwt.encode({ id: user.id, email: user.email }, JWT_SECRET);
+    // JWT 토큰 발급 (jsonwebtoken 방식)
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
     res.json({ token });
   } catch (err) {
     res.status(500).json({ error: '로그인 처리 중 오류 발생' });
@@ -99,7 +94,7 @@ app.get('/api/todos', authenticateToken, async (req, res) => {
   }
 });
 
-// 4. 태스크 추가 (due_date, est_time 등 스네이크 케이스 매핑)
+// 4. 태스크 추가
 app.post('/api/todos', authenticateToken, async (req, res) => {
   const { title, dueDate, due_date, priority, tag, estTime, est_time } = req.body;
 
@@ -119,7 +114,7 @@ app.post('/api/todos', authenticateToken, async (req, res) => {
       .select();
 
     if (error) throw error;
-    res.status(201).json(data[0]);
+    res.status(201).json(data ? data[0] : newTodo);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
