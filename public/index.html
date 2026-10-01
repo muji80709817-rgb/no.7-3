@@ -385,7 +385,7 @@
 
       // 3. 백엔드 및 Supabase DB 저장 요청
       try {
-        await fetch('/api/todos', {
+        const res = await fetch('/api/todos', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -393,8 +393,24 @@
           },
           body: JSON.stringify(newTodo)
         });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          console.error('태스크 DB 저장 실패:', res.status, errData);
+          alert('태스크 저장 실패: ' + (errData.error || `HTTP ${res.status}`));
+          // 실패 시 화면 목록에서도 롤백
+          todosData = todosData.filter(t => t.id !== newTodo.id);
+          renderTodos();
+        } else {
+          const savedData = await res.json().catch(() => null);
+          if (savedData && savedData.id && savedData.id !== newTodo.id) {
+            newTodo.id = savedData.id;
+            renderTodos();
+          }
+        }
       } catch (e) {
         console.warn('서버 저장 통신 오류:', e);
+        alert('서버와 통신할 수 없습니다.');
       }
     }
 

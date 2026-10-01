@@ -170,21 +170,50 @@ app.post(['/api/todos', '/todos'], authenticateToken, async (req, res) => {
     return res.status(500).json({ error: 'Supabase 연동 정보(URL/KEY)가 올바르게 설정되지 않았습니다.' });
   }
 
-  const { title, dueDate, due_date, priority, tag, estTime, est_time } = req.body;
+  const { id, title, dueDate, due_date, priority, tag, estTime, est_time } = req.body;
+  if (!title) {
+    return res.status(400).json({ error: '할 일 제목을 입력해주세요.' });
+  }
+
   try {
     const newTodo = {
-      user_id: req.user.email,
+      user_id: req.user.email || req.user.id,
       title,
-      due_date: due_date || dueDate,
+      due_date: due_date || dueDate || new Date().toISOString().split('T')[0],
       priority: priority || '보통',
       tag: tag || '일반',
-      est_time: est_time || estTime || 60
+      est_time: Number(est_time || estTime) || 60,
+      completed: false
     };
+
+    // DB 테이블의 id 컬럼이 자동 생성이 아닐 경우를 대비해 요청에 id가 있으면 포함
+    if (id) {
+      newTodo.id = id;
+    }
+
     const { data, error } = await supabase.from('todos').insert([newTodo]).select();
-    if (error) throw error;
+
+    if (error) {
+      console.error('Supabase todos insert error:', error);
+      if (error.code === 'PGRST205' || (error.message && error.message.includes('schema cache'))) {
+        return res.status(500).json({ error: "Supabase DB에 'todos' 테이블이 존재하지 않습니다. Supabase SQL Editor에서 테이블을 생성해주세요." });
+      }
+      if (error.code === '42501') {
+        return res.status(403).json({ error: "Supabase 'todos' 테이블의 RLS 보안 정책에 의해 저장이 차단되었습니다. RLS 정책을 추가하거나 비활성화해주세요." });
+      }
+      if (error.code === '23503') {
+        return res.status(400).json({ error: "외래 키 제약 조건 오류: user_id가 맞지 않습니다." });
+      }
+      if (error.code === '23502') {
+        return res.status(400).json({ error: `필수 컬럼 누락 제약 오류: ${error.message}` });
+      }
+      throw error;
+    }
+
     res.status(201).json(data ? data[0] : newTodo);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('태스크 추가 예외:', err);
+    res.status(500).json({ error: err.message || '태스크 저장 중 오류 발생' });
   }
 });
 
