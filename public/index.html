@@ -321,7 +321,6 @@
         }
         showDashboard(email);
       } catch (err) {
-        // 서버 요청 실패 시에도 대시보드는 정상 출력
         showDashboard(email || 'User');
       }
     }
@@ -362,25 +361,29 @@
       }
 
       const token = localStorage.getItem('token');
+      
+      // Supabase todos 테이블 컬럼(due_date, est_time 등) 및 프론트 호환 호환 구조
       const newTodo = {
         id: Date.now(),
         title: title,
+        due_date: document.getElementById('todoDueDate').value || new Date().toISOString().split('T')[0],
         dueDate: document.getElementById('todoDueDate').value || new Date().toISOString().split('T')[0],
         priority: document.getElementById('todoPriority').value || '보통',
         tag: document.getElementById('todoTag').value.trim() || '일반',
+        est_time: Number(document.getElementById('todoEstTime').value) || 60,
         estTime: Number(document.getElementById('todoEstTime').value) || 60
       };
 
-      // 1. 화면의 목록 배열에 즉시 추가하여 UI에 반영
+      // 1. 화면(UI)에 즉시 반영
       todosData.push(newTodo);
       renderTodos();
 
-      // 2. 입력 폼 초기화
+      // 2. 입력창 초기화
       document.getElementById('todoTitle').value = '';
       document.getElementById('todoTag').value = '';
       document.getElementById('todoEstTime').value = '';
 
-      // 3. 백엔드 서버에 비동기 저장 시도
+      // 3. 백엔드 및 Supabase DB 저장 요청
       try {
         await fetch('/api/todos', {
           method: 'POST',
@@ -391,7 +394,7 @@
           body: JSON.stringify(newTodo)
         });
       } catch (e) {
-        console.warn('서버 저장 실패 (로컬 UI에는 즉시 반영됨):', e);
+        console.warn('서버 저장 통신 오류:', e);
       }
     }
 
@@ -410,10 +413,10 @@
               <button onclick="deleteTodo(${t.id})" class="btn-danger">DEL</button>
             </div>
             <div class="todo-meta">
-              <span>DUE: ${t.dueDate || '미정'}</span>
+              <span>DUE: ${t.due_date || t.dueDate || '미정'}</span>
               <span>PRIORITY: ${t.priority || '보통'}</span>
               <span class="tag">${t.tag || '일반'}</span>
-              <span>EST: ${t.estTime || 60}m</span>
+              <span>EST: ${t.est_time || t.estTime || 60}m</span>
             </div>
           </div>
         `).join('');
